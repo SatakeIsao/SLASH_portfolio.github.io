@@ -449,7 +449,12 @@ footer a{color:var(--ember);text-decoration:none;}
 
         <h4 style="font-family:'JetBrains Mono';font-size:12.5px;color:var(--paper-dim);letter-spacing:.08em;margin:28px 0 14px;text-transform:uppercase;">回避とコンボ攻撃</h4>
         <p><strong>回避：</strong><code>Enter</code>時に入力方向を確定し、回避中に別方向へ入力しても向きが不自然に変わらない仕様。<code>SetAvoiding(true)</code>で無敵フラグを立て、線形減速で滑らかに停止する。</p>
-        <div class="media-row"><img src="avoidance.gif" width="280" alt="回避アクション"></div>
+        <p><strong>ジャスト回避：</strong>敵の攻撃が当たる直前のわずかなタイミングで回避入力を行うと、ジャスト回避が発動する。成功時はスロー演出が入り、プレイヤーに有利な状況を生み出す。通常の無敵判定とは別に判定ウィンドウを設け、技術的な回避を報酬として返す設計とした。</p>
+        <div class="media-row">
+          <img src="avoidance.gif" width="280" alt="通常回避">
+          <img src="justDodge.gif" width="280" alt="ジャスト回避">
+        </div>
+        <div class="media-cap">左：通常回避 ／ 右：ジャスト回避（直前回避でスロー発動）</div>
 
         <p><strong>通常攻撃（3コンボ）：</strong><code>ComboAttackCharacterState</code>を基底クラスに、各コンボを派生クラスで<code>GetComboParam()</code>オーバーライドするテンプレートメソッドパターンを採用。<code>isComboInput_</code>フラグでコンボ入力を記録し、攻撃判定の発生・消滅は<code>TaskSchedulerSystem</code>でミリ秒単位制御。</p>
         <div class="media-row"><img src="atkDefault.gif" width="280" alt="通常攻撃"></div>
@@ -463,6 +468,7 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="BlendOFF.gif" width="280" alt="ブレンドOFF">
           <img src="BlendON.gif" width="280" alt="ブレンドON">
         </div>
+        <div class="media-cap">「モーションブレンド」左：反映前 ／ 右：反映後</div>
 
         <h4 style="font-family:'JetBrains Mono';font-size:12.5px;color:var(--paper-dim);letter-spacing:.08em;margin:28px 0 14px;text-transform:uppercase;">HPに連動する動的モーション</h4>
         <p>毎フレーム<code>IsInjured()</code>でHP割合を判定し、一定値以下で<code>InjuredIdle</code> / <code>InjuredRun</code>へ自動切替。負傷状態では移動速度0.5倍に制限され、ノックバック後の起き上がり時も再び自動で負傷ステートへ戻るよう優先度を制御。</p>
@@ -470,6 +476,7 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="RunDefault.gif" width="280" alt="通常走行">
           <img src="RunInjury.gif" width="280" alt="負傷時走行">
         </div>
+        <div class="media-cap">「Playerのモーション」左：HPに余裕がある時 ／ 右：HPに余裕がない時</div>
       </div>
 
       <div class="pillar" id="pool">
@@ -477,6 +484,10 @@ footer a{color:var(--ember);text-decoration:none;}
         <p>当初は敵の出現・死亡のたびに<code>new</code> / <code>delete</code>を行っていたが、敵が同時多数死亡した瞬間にメモリ解放処理が集中し、FPSが瞬間的に低下する「スパイク現象」が発生していた。</p>
         <p>シーン初期化時に最大出現数の敵オブジェクトを一括生成し<code>EnemyPool</code>に格納。出現時は未使用オブジェクトを検索してアクティブ化し、死亡時は<code>delete</code>せず描画・衝突判定をオフにして非アクティブへ戻す。</p>
         <p><strong>成果：</strong>リアルタイムなメモリ確保・解放をゼロにし、敵が次々と押し寄せる無双系アクションでありながら処理落ちのない安定した60FPSを維持。</p>
+        <div class="media-row" style="justify-content:center;margin-top:18px;">
+          <img src="objectPool.png" alt="オブジェクトプール図解" style="max-width:540px;width:100%;border:1px solid var(--line-soft);">
+        </div>
+        <div class="media-cap">オブジェクトプールの構造：使用中・待機中を切り替えるだけでメモリ確保を不要にする</div>
       </div>
     </section>
 
@@ -485,7 +496,29 @@ footer a{color:var(--ember);text-decoration:none;}
       <h2>技術的なこだわり②：レンダリング</h2>
 
       <div class="pillar">
-        <h3><span class="num">01</span>壁のディザリング透過による視認性向上（modelWall.fx）</h3>
+        <h3><span class="num">01</span>フォワードレンダリングからディファードレンダリングへの移行</h3>
+        <p>本作はスポーンエフェクト・スポットライト・環境光など多数の光源を同時に扱う。フォワードレンダリングでは<strong>光源数 × ジオメトリ数</strong>で描画コストが増加するため、光源が増えるほどフレームレートが低下する問題があった。これを根本から解決するために、レンダリングパイプラインの根幹をディファードレンダリングへ移行した。</p>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">フォワードの問題</div><p>各ジオメトリを描画するたびに全光源のライティングを計算するため、光源が増えるほど処理コストが線形増大する</p></div>
+          <div class="solution"><div class="label">ディファードの利点</div><p>ジオメトリ情報をG-Bufferに一度書き込み、ライティングをスクリーン空間で一括計算することで光源数の影響をジオメトリ描画から切り離す</p></div>
+        </div>
+
+        <p><strong>G-Bufferの構成：</strong>1フレームに3枚のレンダーターゲットへジオメトリ情報を書き込む。</p>
+        <div class="cause-effect">
+          <div class="problem"><div class="label">アルベドRT</div><p>オブジェクトの色情報（RGBA8）。wチャンネルに「影を受けるか」フラグを格納し、テクスチャ枚数を節約</p></div>
+          <div class="solution"><div class="label">法線RT</div><p>法線ベクトル（RGBA16_FLOAT）。wチャンネルにスペキュラ強度を格納することで、RTを1枚削減</p></div>
+        </div>
+        <div class="cause-effect">
+          <div class="problem"><div class="label">ワールド座標RT</div><p>各ピクセルのワールド座標（RGBA32_FLOAT）。wチャンネルが0のピクセルはジオメトリなしとして後段でdiscardする</p></div>
+          <div class="solution"><div class="label">副次的な活用</div><p>このワールド座標RTをそのままDoF（被写界深度）シェーダーでも参照し、カメラとの実距離からぼかし量を算出。RTを使い回すことで追加コストなしにDoFの精度が向上した</p></div>
+        </div>
+
+        <p><strong>ライティングパス（deferredLighting.fx）：</strong>G-Bufferの3枚を読み込み、ディレクションライト・ポイントライト・スポットライト・半球ライト・VSMシャドウを一括計算する。さらにTBDR（タイルベースディファードレンダリング）をコンピュートシェーダーで実装し、最大1000個のポイントライトをタイル単位でカリングして処理を分散させた。</p>
+      </div>
+
+      <div class="pillar">
+        <h3><span class="num">02</span>壁のディザリング透過による視認性向上（modelWall.fx）</h3>
         <p>カメラとプレイヤーの間に壁などの遮蔽物が入り込むと自キャラが見えなくなり、プレイの快適性が損なわれる。これを解決するため、アルファブレンドではなくカスタムシェーダー<code>modelWall.fx</code>による<strong>順序付きディザリング透過</strong>を実装した。</p>
 
         <div class="cause-effect">
@@ -501,6 +534,63 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="ditherOFF.gif" width="380" alt="ディザリングOFF">
           <img src="ditherON.gif" width="380" alt="ディザリングON">
         </div>
+        <div class="media-cap">「壁のディザリング」上：反映前 ／ 下：反映後</div>
+      </div>
+
+      <div class="pillar">
+        <h3><span class="num">03</span>溜め攻撃中の被写界深度（DoF）・モーションブラー演出</h3>
+        <p>溜め攻撃の「チャージ中」という緊張感あるフェーズを、画面エフェクトで視覚的に強調するために実装した。チャージ中は周囲をぼかし、振り下ろしの瞬間にエフェクトが消えることで<strong>「解放感」と「爽快感」</strong>をより強く演出できる。</p>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">Problem</div><p>プレイヤー本体までぼけると操作感が損なわれる</p></div>
+          <div class="solution"><div class="label">Solution</div><p>GBufferのワールド座標からプレイヤー周囲に「保護ゾーン」を設け、その外だけをぼかす</p></div>
+        </div>
+        <div class="cause-effect">
+          <div class="problem"><div class="label">Problem</div><p>同一レンダーターゲットの同時読み書きはGPU動作が不定になる</p></div>
+          <div class="solution"><div class="label">Solution</div><p>メインRT → テンポラリRTへコピーしてからブラーを合成する2パス構成で回避</p></div>
+        </div>
+        <div class="cause-effect">
+          <div class="problem"><div class="label">Problem</div><p>エフェクトが瞬時にON/OFFされると不自然に見える</p></div>
+          <div class="solution"><div class="label">Solution</div><p>毎フレーム少しずつ強度を補間し、チャージの「高まり」と「解放」をエフェクトの変化で表現</p></div>
+        </div>
+
+        <div class="media-row">
+          <img src="chargeBlurOFF.gif" width="380" alt="DoF・ブラーOFF">
+          <img src="chargeBlurON.gif" width="380" alt="DoF・ブラーON">
+        </div>
+        <div class="media-cap">「DoF・モーションブラー」上：反映前 ／ 下：反映後</div>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">配慮した点</div><p>画面エフェクトで酔いやすいプレイヤーに対して、演出を強制することでプレイ体験を損ねる恐れがあった</p></div>
+          <div class="solution"><div class="label">Solution</div><p>オプション画面からDoFとモーションブラーをそれぞれ独立してOFFにできる設定を追加した</p></div>
+        </div>
+        <p>ゲーム状態フラグ（チャージ中かどうか）とユーザー設定（ONにしているか）をAND条件で評価し、どちらかがOFFであれば確実にエフェクトが無効化される設計とした。</p>
+      </div>
+
+      <div class="pillar">
+        <h3><span class="num">04</span>敵スポーン時のスポットライト演出</h3>
+        <p>敵が突然出現すると、プレイヤーが気づかずに攻撃を受けてしまう問題があった。光でスポーンのタイミングを視覚的に伝えることで、<strong>「敵が来た」と直感的に気づかせる</strong>演出を実装した。</p>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">2灯構成の理由</div><p>スポットライトだけでは足元が暗くなり浮いた印象になる。また1種類の光では演出として単調になりやすい</p></div>
+          <div class="solution"><div class="label">Solution</div><p>足元に暖色系ポイントライト（近距離グロー）＋真上から絞った円錐スポットライトを組み合わせ、地面の輝きと天からの光が共存する舞台的な出現演出を実現</p></div>
+        </div>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">輝度フェードの工夫</div><p>線形に暗くすると終盤まで明るすぎて、急に消えるような不自然な印象になる</p></div>
+          <div class="solution"><div class="label">Solution</div><p>強度を <strong>√t</strong> で減衰させることで明るさを長く維持しつつ、終盤でなめらかに消えるカーブを実現</p></div>
+        </div>
+
+        <div class="cause-effect">
+          <div class="problem"><div class="label">スポットライトの高さ演出</div><p>スポットライトが固定高さだと静的な印象で、「降ってくる光」の動きが伝わらない</p></div>
+          <div class="solution"><div class="label">Solution</div><p>出現直後から <strong>easeOutCubic</strong> で高さを 1.0 倍 → 1.95 倍へ拡張し、天空から地上へ光が広がり降りてくるような動きを表現</p></div>
+        </div>
+
+        <div class="media-row">
+          <img src="spawnLightOFF.gif" width="280" alt="スポーンライトOFF">
+          <img src="spawnLightON.gif" width="280" alt="スポーンライトON">
+        </div>
+        <div class="media-cap">「ポイントライト＋スポットライト」左：反映前 ／ 右：反映後</div>
       </div>
     </section>
 
@@ -542,6 +632,7 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="titleSkashBefore.gif" width="380" alt="斬撃演出 前">
           <img src="titleSkashAfter.gif" width="380" alt="斬撃演出 後">
         </div>
+        <div class="media-cap">「衝撃モーション」上：反映前 ／ 下：反映後</div>
       </div>
 
       <div class="pillar">
@@ -551,11 +642,13 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="notificationHPBefore.gif" width="280" alt="通知UI 前">
           <img src="notificationHPAfter.gif" width="280" alt="通知UI 後">
         </div>
+        <div class="media-cap">「スライドアニメーション」左：改善前 ／ 右：改善後</div>
         <p><strong>レベル数値アニメーション：</strong>数値フォントが上から降って着地する2段階アニメーション。Phase1は<code>t³</code>の3乗EaseInで重力に従い加速度的に着地する「重さ」を表現、Phase2は減衰正弦波で文字を縦揺れさせ自然に収束させる。隣接する「Lv.」アイコンは着地から0.06秒遅らせ振幅を小さくして揺らすことで、衝撃が時間差で伝わるリアルな手触りを演出した。</p>
         <div class="media-row">
           <img src="LvUpBefore.gif" width="280" alt="レベル数値 前">
           <img src="LvUpAfter.gif" width="280" alt="レベル数値 後">
         </div>
+        <div class="media-cap">「衝撃アニメーション」左：改善前 ／ 右：改善後</div>
       </div>
 
       <div class="pillar">
@@ -567,6 +660,7 @@ footer a{color:var(--ember);text-decoration:none;}
           <img src="hpRecoveryBefore.gif" width="380" alt="HP回復 前">
           <img src="hpRecoveryAfter.gif" width="380" alt="HP回復 後">
         </div>
+        <div class="media-cap">「HP回復演出」上：改善前 ／ 下：改善後</div>
       </div>
     </section>
 
